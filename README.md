@@ -11,6 +11,7 @@ This is a collection of small tools to work with files from the 1999 Game "Star 
 - parse-racer-tab.py: Validates racer.tab translation files
 - parse-savedata.py: Parses (tgfd.dat, 4056 bytes) and profile (*.sav, 84 bytes) files
 - decompress.c: Decompress "Comp" modelblock chunks (found in N64 version)
+- extract-data.c: Extracts hardcoded data from swep1rcr.exe
 
 ## Installation
 
