@@ -36,6 +36,24 @@ typedef struct {
 } PACKED PodracerData;
 
 typedef struct {
+  float AntiSkid; // 0
+  float TurnResponse; // 4
+  float MaxTurnRate; // 8
+  float Acceleration; // 12
+  float MaxSpeed; // 16
+  float AirbrakeInv; // 20
+  float DecelInv; // 24
+  float BoostThrust; // 28
+  float HeatRate; // 32
+  float CoolRate; // 36
+  float HoverHeight; // 40
+  float RepairRate; // 44
+  float BumpMass; // 48
+  float DmgImmunity; // 52
+  float IsectRadius; // 56 //FIXME: Not sure
+} PACKED PodracerHandlingData;
+
+typedef struct {
   uint32_t track_model;
   uint32_t unk_spline; // Spline for this track - unknown usage
   uint8_t raceIndexOnPlanet;
@@ -44,7 +62,7 @@ typedef struct {
   uint8_t pad; // padding?
 } PACKED TrackData;
 
-static void* readExe(FILE* f, off_t offset, size_t size) {
+static void* readExe(FILE* f, uint32_t offset, size_t size) {
 
   /*
     From `objdump -x swep1rcr.exe` for the patched US version:
@@ -119,14 +137,16 @@ int main(int argc, char* argv[]) {
   fread(&timestamp, 4, 1, f);
 
   // Now set the correct pointers for this binary
-  off_t replacementPartOffset;
-  off_t podracerOffset;
-  off_t trackOffset;
+  uint32_t replacementPartOffset;
+  uint32_t podracerOffset;
+  uint32_t trackOffset;
+  uint32_t podracerHandlingOffset;
   switch(timestamp) {
   case 0x3C60692C:
     replacementPartOffset = 0x4C1CB8;
     podracerOffset = 0x4C2700;
     trackOffset = 0x4BFEE8;
+    podracerHandlingOffset = 0x4C2BB0;
     break;
   default:
     printf("Unsupported version of the game, timestamp 0x%08X\n", timestamp);
@@ -136,7 +156,7 @@ int main(int argc, char* argv[]) {
   // Dump the list of replacement parts
   unsigned int replacementPartCount = 7 * 6; // 7 categories x 6 levels - FIXME: Read from file?
   PartData* replacementParts = readExe(f, replacementPartOffset, replacementPartCount * sizeof(PartData));
-  size_t max_title_len = 0;
+  unsigned int max_title_len = 0;
   for(unsigned int i = 0; i < replacementPartCount; i++) {
     PartData* d = &replacementParts[i];
     char* title = reallocEscapedString(readExe(f, d->title, 4096)); // FIXME: What length would be good here?
@@ -149,7 +169,7 @@ int main(int argc, char* argv[]) {
   for(unsigned int i = 0; i < replacementPartCount; i++) {
     PartData* d = &replacementParts[i];
     char* title = reallocEscapedString(readExe(f, d->title, 4096)); // FIXME: What length would be good here?
-    printf("  { PART_%d, %d, 0x%02X, PART_CATEGORY_%d, %5d, \"%s\"%*s, MODEL_%d },\n", d->index, d->level, d->unk1, d->category, d->price, title, max_title_len - strlen(title), "", d->model);
+    printf("  { PART_%d, %d, 0x%02X, PART_CATEGORY_%d, %5d, \"%s\"%*s, MODEL_%d },\n", d->index, d->level, d->unk1, d->category, d->price, title, max_title_len - (int)strlen(title), "", d->model);
     free(title);
   }
   printf("};\n");
@@ -184,7 +204,40 @@ int main(int argc, char* argv[]) {
   printf("};\n");
   free(podracers);
 
-  //FIXME: Dump podracer handling data
+  printf("\n");
+
+  // Dump podracer handling data
+  // There seems to be an additional AI handling profile at the end
+  unsigned int podracerHandlingCount = podracerCount + 1;
+  PodracerHandlingData* podracerHandling = readExe(f, podracerHandlingOffset, podracerHandlingCount * sizeof(PodracerHandlingData));
+  printf("PodracerHandlingData podracerHandling[] = {\n");
+  for(unsigned int i = 0; i < podracerHandlingCount; i++) {
+    PodracerHandlingData* d = &podracerHandling[i];
+    printf("  { %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f },",
+      d->AntiSkid,
+      d->TurnResponse,
+      d->MaxTurnRate,
+      d->Acceleration,
+      d->MaxSpeed,
+      d->AirbrakeInv,
+      d->DecelInv,
+      d->BoostThrust,
+      d->HeatRate,
+      d->CoolRate,
+      d->HoverHeight,
+      d->RepairRate,
+      d->BumpMass,
+      d->DmgImmunity,
+      d->IsectRadius
+    );
+    if (i < podracerHandlingCount - 1) {
+      printf(" // PODRACER_%d\n", i);
+    } else {
+      printf(" // AI preset?\n");
+    }
+  }
+  printf("};\n");
+  free(podracerHandling);
 
   printf("\n");
 
@@ -194,8 +247,10 @@ int main(int argc, char* argv[]) {
   printf("TrackData tracks[] = {\n");
   for(unsigned int i = 0; i < trackCount; i++) {
     TrackData* d = &tracks[i];
-    printf("  { MODEL_%d, SPLINE_%d, %d, PLANET_%d, PODRACER_%d, 0x%02X },\n",
-       d->track_model, d->unk_spline, d->raceIndexOnPlanet, d->planet, d->trackFavorite, d->pad);
+    printf("  { MODEL_%d, SPLINE_%d, %d, PLANET_%d, PODRACER_%d, 0x%02X },",
+       d->track_model, d->unk_spline, d->raceIndexOnPlanet, d->planet, d->trackFavorite, d->pad
+    );
+    printf(" // TRACK_%d\n", i);
   }
   printf("};\n");
   free(tracks);
