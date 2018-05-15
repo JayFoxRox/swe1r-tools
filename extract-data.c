@@ -62,6 +62,24 @@ typedef struct {
   uint8_t pad; // padding?
 } PACKED TrackData;
 
+typedef struct {
+  float x;
+  float y;
+  float z;
+} PACKED Vec3;
+
+typedef struct {
+  Vec3 pod_position;
+  Vec3 engine_position;
+  Vec3 unk2;
+  Vec3 wire_pod_position;
+  Vec3 wire_engine_position;
+  Vec3 magbeam_position;
+  Vec3 unk6;
+  Vec3 unk7;
+  Vec3 unk8;
+} PACKED PodracerParameterData;
+
 static void* readExe(FILE* f, uint32_t offset, size_t size) {
 
   /*
@@ -106,6 +124,46 @@ static void* readExe(FILE* f, uint32_t offset, size_t size) {
   return data;
 }
 
+static void dumpTexture(FILE* f, size_t offset, uint8_t unk0, uint8_t unk1, unsigned int width, unsigned int height, const char* filename) {
+  // Presumably the format information?
+  assert(unk0 == 3);
+  assert(unk1 == 0);
+
+  FILE* out = fopen(filename, "wb");
+  fprintf(out, "P3\n%d %d\n15\n", width, height);
+
+  // Copy the pixel data
+  uint8_t* texture = readExe(f, offset, width * height * 4 / 8);
+  for(unsigned int i = 0; i < width * height * 2; i++) {
+    uint8_t v = ((texture[i / 2] << ((i % 2) * 4)) & 0xF0) >> 4;
+    fprintf(out, "%d %d %d\n", v, v, v);
+  }
+  free(texture);
+
+  fclose(out);
+  return;
+}
+
+static uint32_t dumpTextureTable(FILE* f, uint32_t offset, uint8_t unk0, uint8_t unk1, unsigned int width, unsigned int height, const char* filename) {
+  char filename_i[4096]; //FIXME: Size
+
+  // Get size of the table
+  uint32_t* buffer = readExe(f, offset + 0, 4);
+  uint32_t count = *buffer;
+  free(buffer);
+
+  // Loop over elements and dump each
+  printf("// %s at 0x%X\n", filename, offset);
+  uint32_t* offsets = readExe(f, offset + 4, count * 4);
+  for(unsigned int i = 0; i < count; i++) {
+    sprintf(filename_i, "%s_%d.ppm", filename, i);
+    printf("// - [%d]: 0x%X\n", i, offsets[i]);
+    dumpTexture(f, offsets[i], unk0, unk1, width, height, filename_i);
+  }
+  free(offsets);
+  return count;
+}
+
 static char* escapeString(const char* string) {
   char* escaped_string = malloc(strlen(string) * 2 + 1);
   const char* s = string;
@@ -139,14 +197,16 @@ int main(int argc, char* argv[]) {
   // Now set the correct pointers for this binary
   uint32_t replacementPartOffset;
   uint32_t podracerOffset;
-  uint32_t trackOffset;
   uint32_t podracerHandlingOffset;
+  uint32_t podracerParameterOffset;
+  uint32_t trackOffset;
   switch(timestamp) {
   case 0x3C60692C:
     replacementPartOffset = 0x4C1CB8;
     podracerOffset = 0x4C2700;
-    trackOffset = 0x4BFEE8;
     podracerHandlingOffset = 0x4C2BB0;
+    podracerParameterOffset = 0x4C7088;
+    trackOffset = 0x4BFEE8;
     break;
   default:
     printf("Unsupported version of the game, timestamp 0x%08X\n", timestamp);
@@ -239,6 +299,38 @@ int main(int argc, char* argv[]) {
   printf("};\n");
   free(podracerHandling);
 
+  // Dump podracer parameters
+  unsigned int podracerParameterCount = podracerCount;
+  PodracerParameterData* podracerParameter = readExe(f, podracerParameterOffset, podracerParameterCount * sizeof(PodracerParameterData));
+  printf("PodracerParameterData podracerParameter[] = {\n");
+  for(unsigned int i = 0; i < podracerParameterCount; i++) {
+    PodracerParameterData* d = &podracerParameter[i];
+    printf("  // PODRACER_%d:\n", i);
+    printf("  {\n"
+           "    %f, %f, %f, // pod position\n"
+           "    %f, %f, %f, // engine position\n"
+           "    %f, %f, %f,\n"
+           "    %f, %f, %f, // wire (pod) position\n"
+           "    %f, %f, %f, // wire (engine) position \n"
+           "    %f, %f, %f, // magbeam position\n"
+           "    %f, %f, %f,\n"
+           "    %f, %f, %f,\n"
+           "    %f, %f, %f,\n"
+           "  },\n",
+      d->pod_position.x, d->pod_position.y, d->pod_position.z,
+      d->engine_position.x, d->engine_position.y, d->engine_position.z,
+      d->unk2.x, d->unk2.y, d->unk2.z,
+      d->wire_pod_position.x, d->wire_pod_position.y, d->wire_pod_position.z,
+      d->wire_engine_position.x, d->wire_engine_position.y, d->wire_engine_position.z,
+      d->magbeam_position.x, d->magbeam_position.y, d->magbeam_position.z,
+      d->unk6.x, d->unk6.y, d->unk6.z,
+      d->unk7.x, d->unk7.y, d->unk7.z,
+      d->unk8.x, d->unk8.y, d->unk8.z
+    );
+  }
+  printf("};\n");
+  free(podracerParameter);
+
   printf("\n");
 
   // Dump list of tracks
@@ -255,8 +347,14 @@ int main(int argc, char* argv[]) {
   printf("};\n");
   free(tracks);
 
+  printf("\n");
 
-
+  // Dump textures
+  dumpTextureTable(f, 0x4BF91C, 3, 0, 64, 128, "font0");
+  dumpTextureTable(f, 0x4BF7E4, 3, 0, 64, 128, "font1");
+  dumpTextureTable(f, 0x4BF84C, 3, 0, 64, 128, "font2");
+  dumpTextureTable(f, 0x4BF8B4, 3, 0, 64, 128, "font3");
+  dumpTextureTable(f, 0x4BF984, 3, 0, 64, 128, "font4");
 
   fclose(f);
 
